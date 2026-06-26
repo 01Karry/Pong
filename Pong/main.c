@@ -38,10 +38,8 @@ enum GAMEOVER {
 
 #define RACKET_VELOCITY 500
 
-Vector2 FieldOrigin = { OFFSET_FOR_FIELD, HEADHER_HEIGHT + OFFSET_FOR_FIELD };
-
 typedef struct Ball_t {
-    Rectangle hitBox;
+    Vector2 center;
     int radius;
     Vector2 velocity;
     int racketCollsionCount;
@@ -51,6 +49,7 @@ typedef struct Ball_t {
 
 typedef struct Racket_t {
     Rectangle hitBox;
+    Rectangle drawingBox;
     Vector2 velocity;
 } Racket_t;
 
@@ -72,14 +71,17 @@ void updatePlayerRacket();
 void updateBotRacket(int level);
 bool canMoveRacket(Racket_t racket);
 void updateBallYVelocity(Racket_t racket);
+bool CheckCollisionRayLeftRacket(Vector2 from, Vector2 to, Racket_t racket);
+bool CheckCollisionRayRightRacket(Vector2 from, Vector2 to, Racket_t racket);
+
 
 int main() {
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "THE PONG");
     SetTargetFPS(TARGET_FPS);
 
     Ball = initBall();
-    LeftRacket = initRacket(FieldOrigin.x + LINE_THICK + 10);
-    RightRacket = initRacket(FieldOrigin.x + FIELD_WIDTH - LINE_THICK - RACKET_WIDTH - 10);
+    LeftRacket = initRacket(Field.x + LINE_THICK + 10);
+    RightRacket = initRacket(Field.x + FIELD_WIDTH - LINE_THICK - RACKET_WIDTH - 10);
 
     int gameOverCode;
     int playerScore = 0;
@@ -102,8 +104,8 @@ int main() {
             EndDrawing();
 
             Ball = initBall();
-            LeftRacket = initRacket(FieldOrigin.x + LINE_THICK + 10);
-            RightRacket = initRacket(FieldOrigin.x + FIELD_WIDTH - LINE_THICK - RACKET_WIDTH - 10);
+            LeftRacket = initRacket(Field.x + LINE_THICK + 10);
+            RightRacket = initRacket(Field.x + FIELD_WIDTH - LINE_THICK - RACKET_WIDTH - 10);
             LastCountToUpdateBallSpeed = 0;
 
             continue;
@@ -126,7 +128,7 @@ void drawGame() {
     DrawRectangle(10, HEADHER_HEIGHT + 10, SCREEN_WIDTH - 20, FIELD_HEIGHT, GRAY);
     DrawRectangleLinesEx(Field, LINE_THICK, BLACK);
 
-    DrawCircle(Ball.hitBox.x + Ball.radius, Ball.hitBox.y + Ball.radius, Ball.radius, WHITE);
+    DrawCircle(Ball.center.x, Ball.center.y, Ball.radius, WHITE);
 
     drawRacket(LeftRacket);
     drawRacket(RightRacket);
@@ -160,15 +162,13 @@ Ball_t initBall() {
 
     Ball_t ball = { .radius = 10 };
 
-    Vector2 FieldCenter = { Field.x + Field.width / 2, Field.y + Field.height / 2 };
-
-    ball.hitBox = (Rectangle){ FieldCenter.x - ball.radius, FieldCenter.y - ball.radius, 2 * ball.radius, 2 * ball.radius };
+    ball.center = (Vector2){ Field.x + Field.width / 2, Field.y + Field.height / 2 };
 
     const int BaseVelocity = 500;
 
     int xVelocityDir = rand() % 2 == 1 ? 1 : -1;
     int yVelocityDir = rand() % 2 == 1 ? 1 : -1;
-    int yVelocity = rand() % BaseVelocity;
+    int yVelocity = 0;
 
     ball.velocity = (Vector2){ xVelocityDir * BaseVelocity, yVelocityDir * yVelocity };
 
@@ -199,27 +199,28 @@ void updateBall() {
         LastCountToUpdateBallSpeed = Ball.racketCollsionCount;
     }
 
-    Ball.hitBox.x += Ball.velocity.x / TARGET_FPS;
-    Ball.hitBox.y += Ball.velocity.y / TARGET_FPS;
+    Ball.center.x += Ball.velocity.x / TARGET_FPS;
+    Ball.center.y += Ball.velocity.y / TARGET_FPS;
 }
 
 int getCollisions() {
     int collisions = 0;
 
-    if (Ball.hitBox.y <= Field.y)
+    if (Ball.center.y - Ball.radius <= Field.y)
         collisions |= TOP;
-    else if (Ball.hitBox.y + 2 * Ball.radius >= Field.y + Field.height)
+    else if (Ball.center.y + Ball.radius >= Field.y + Field.height)
         collisions |= BOTTOM;
 
-    if (Ball.hitBox.x < LeftRacket.hitBox.x + RACKET_WIDTH / 2)
+    if (Ball.center.x - Ball.radius < LeftRacket.drawingBox.x + RACKET_WIDTH / 2)
         collisions |= LEFT_WALL;
-    else if (Ball.hitBox.x + 2 * Ball.radius > RightRacket.hitBox.x + RACKET_WIDTH / 2)
+    else if (Ball.center.x + Ball.radius > RightRacket.drawingBox.x + RACKET_WIDTH / 2)
         collisions |= RIGHT_WALL;
 
-    Rectangle nextFrameBallHitbox = { Ball.hitBox.x + Ball.velocity.x / TARGET_FPS, Ball.hitBox.y + Ball.velocity.y / TARGET_FPS, Ball.hitBox.width, Ball.hitBox.height };
-    if (CheckCollisionRecs(nextFrameBallHitbox, LeftRacket.hitBox) && Ball.velocity.x < 0)
+    Vector2 nextFrameBallCenter = { Ball.center.x + Ball.velocity.x / TARGET_FPS, Ball.center.y + Ball.velocity.y / TARGET_FPS };
+
+    if (Ball.velocity.x < 0 && CheckCollisionRayLeftRacket(Ball.center, nextFrameBallCenter, LeftRacket))
         collisions |= LEFT_RACKET;
-    else if (CheckCollisionRecs(nextFrameBallHitbox, RightRacket.hitBox) && Ball.velocity.x > 0)
+    else if (Ball.velocity.x > 0 && CheckCollisionRayRightRacket(Ball.center, nextFrameBallCenter, RightRacket))
         collisions |= RIGHT_RACKET;
 
     return collisions;
@@ -230,11 +231,18 @@ Racket_t initRacket(int x) {
 
     const int baseRacketHeight = 120;
 
-    racket.hitBox = (Rectangle){
+    racket.drawingBox = (Rectangle){
         x,
-        FieldOrigin.y + (FIELD_HEIGHT - baseRacketHeight) / 2,
+        Field.y + (FIELD_HEIGHT - baseRacketHeight) / 2,
         RACKET_WIDTH,
         baseRacketHeight
+    };
+
+    racket.hitBox = (Rectangle){
+        x,
+        Field.y + (FIELD_HEIGHT - baseRacketHeight) / 2 + Ball.radius,
+        RACKET_WIDTH + Ball.radius,
+        baseRacketHeight + 2 * Ball.radius
     };
 
     racket.velocity = (Vector2){ 0, 0 };
@@ -244,10 +252,10 @@ Racket_t initRacket(int x) {
 
 void drawRacket(Racket_t racket) {
     DrawRectangle(
-        racket.hitBox.x,
-        racket.hitBox.y,
-        racket.hitBox.width,
-        racket.hitBox.height,
+        racket.drawingBox.x,
+        racket.drawingBox.y,
+        racket.drawingBox.width,
+        racket.drawingBox.height,
         DARKPURPLE
     );
 }
@@ -274,28 +282,28 @@ void updatePlayerRacket() {
     int step = LeftRacket.velocity.y / TARGET_FPS;
 
     if (canMoveRacket(LeftRacket))
-        LeftRacket.hitBox.y += step;
+        LeftRacket.drawingBox.y += step;
 }
 
 void updateBotRacket(int level) {
     const int velocityFactor = 5 - level;
 
-    float YCenterRacket = RightRacket.hitBox.y + RightRacket.hitBox.height / 2;
+    float YCenterRacket = RightRacket.drawingBox.y + RightRacket.drawingBox.height / 2;
 
-    if (YCenterRacket < Ball.hitBox.y + Ball.radius)
+    if (YCenterRacket < Ball.center.y + Ball.radius)
         RightRacket.velocity.y = RACKET_VELOCITY / velocityFactor;
-    else if (YCenterRacket > Ball.hitBox.y + Ball.radius)
+    else if (YCenterRacket > Ball.center.y + Ball.radius)
         RightRacket.velocity.y = -RACKET_VELOCITY / velocityFactor;
 
     if (canMoveRacket(RightRacket))
-        RightRacket.hitBox.y += RightRacket.velocity.y / TARGET_FPS;
+        RightRacket.drawingBox.y += RightRacket.velocity.y / TARGET_FPS;
 }
 
 bool canMoveRacket(Racket_t racket) {
     int step = racket.velocity.y / TARGET_FPS;
 
-    if ((racket.velocity.y < 0 && racket.hitBox.y + step >= FieldOrigin.y + Ball.radius) ||
-        (racket.velocity.y > 0 && racket.hitBox.y + racket.hitBox.height + step <= FieldOrigin.y + FIELD_HEIGHT - Ball.radius)) {
+    if ((racket.velocity.y < 0 && racket.drawingBox.y + step >= Field.y + Ball.radius) ||
+        (racket.velocity.y > 0 && racket.drawingBox.y + racket.drawingBox.height + step <= Field.y + FIELD_HEIGHT - Ball.radius)) {
 
         return true;
     }
@@ -306,12 +314,43 @@ bool canMoveRacket(Racket_t racket) {
 // Racket that ball collide with
 void updateBallYVelocity(Racket_t racket) {
     const float maxChangeInVelocity = 200;
-    const float maxDiff = racket.hitBox.height / 2 + Ball.radius;
+    const float maxDiff = racket.drawingBox.height / 2 + Ball.radius;
 
-    float RacketCenterY = racket.hitBox.y + racket.hitBox.height / 2;
-    float BallCenterY = Ball.hitBox.y + Ball.radius;
+    float RacketCenterY = racket.drawingBox.y + racket.drawingBox.height / 2;
+    float BallCenterY = Ball.center.y + Ball.radius;
 
     float diff = RacketCenterY - BallCenterY;
 
     Ball.velocity.y -= (maxChangeInVelocity / maxDiff) * diff + racket.velocity.y / 10;
+}
+
+bool CheckCollisionRayLeftRacket(Vector2 from, Vector2 to, Racket_t racket) {
+    float x = racket.hitBox.x + racket.hitBox.width;
+
+    if (from.x > x && to.x > x || from.x < x && to.x < x) return false;
+
+    float K = (x - from.x) / (to.x - from.x);
+
+    float y = K * (to.y - from.y) + from.y;
+
+    if (y >= racket.hitBox.y && y <= racket.hitBox.y + racket.hitBox.height) {
+        return true;
+    }
+
+    return false;
+}
+
+bool CheckCollisionRayRightRacket(Vector2 from, Vector2 to, Racket_t racket) {
+    float x = racket.hitBox.x;
+
+    if (from.x < x && to.x < x || from.x > x && to.x > x) return false;
+
+    float K = (x - from.x) / (to.x - from.x);
+
+    float y = K * (to.y - from.y) + from.y;
+
+    if (y >= racket.hitBox.y && y <= racket.hitBox.y + racket.hitBox.height)
+        return true;
+
+    return false;
 }
