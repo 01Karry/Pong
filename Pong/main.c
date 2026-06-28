@@ -23,6 +23,12 @@ enum GAMEOVER {
     BOT_WON
 };
 
+enum ACTIONS {
+    NOACT,
+    CLOSE_WINDOW,
+    NEW_GAME
+};
+
 #define TARGET_FPS 60
 
 #define SCREEN_WIDTH 1000
@@ -73,7 +79,11 @@ bool canMoveRacket(Racket_t racket);
 void updateBallYVelocity(Racket_t racket);
 bool CheckCollisionRayLeftRacket(Vector2 from, Vector2 to, Racket_t racket);
 bool CheckCollisionRayRightRacket(Vector2 from, Vector2 to, Racket_t racket);
-
+int drawEndScreen(int playerScore, int botScore);
+bool isCursorOnButton(Rectangle button);
+bool isButtonPresed(Rectangle button);
+void showButton(Rectangle button, char* text, Color color, Color colorForCursorOnButton, Color TextColor);
+int drawStartScreen(int* difficulty);
 
 int main() {
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, "THE PONG");
@@ -83,11 +93,31 @@ int main() {
     LeftRacket = initRacket(Field.x + LINE_THICK + 10);
     RightRacket = initRacket(Field.x + FIELD_WIDTH - LINE_THICK - RACKET_WIDTH - 10);
 
+    int maxScore = 5;
     int gameOverCode;
     int playerScore = 0;
     int botScore = 0;
+    int difficulty;
+    bool isGameGoing = false;
 
     while (!WindowShouldClose()) {
+        if (!isGameGoing) {
+            if (drawStartScreen(&difficulty) == CLOSE_WINDOW)
+                break;
+
+            isGameGoing = true;
+
+            BeginDrawing();
+            ClearBackground(SKYBLUE);
+
+            drawHeader(playerScore, botScore);
+            drawGame();
+
+            EndDrawing();
+
+            WaitTime(1);
+        }
+
         BeginDrawing();
         ClearBackground(SKYBLUE);
 
@@ -103,6 +133,19 @@ int main() {
 
             EndDrawing();
 
+            if (playerScore >= maxScore || botScore >= maxScore) {
+                int NextAction = drawEndScreen(playerScore, botScore);
+
+                if (NextAction == CLOSE_WINDOW)
+                    break;
+
+                playerScore = 0;
+                botScore = 0;
+
+                if (drawStartScreen(&difficulty) == CLOSE_WINDOW)
+                    break;
+            }
+
             Ball = initBall();
             LeftRacket = initRacket(Field.x + LINE_THICK + 10);
             RightRacket = initRacket(Field.x + FIELD_WIDTH - LINE_THICK - RACKET_WIDTH - 10);
@@ -112,12 +155,11 @@ int main() {
         }
 
         updatePlayerRacket();
-        updateBotRacket(0);
+        updateBotRacket(difficulty);
         updateBall();
 
         EndDrawing();
     }
-
 
     CloseWindow();
 
@@ -139,7 +181,7 @@ void drawHeader(int playerScore, int botScore) {
     const int scoreFontSize = 50;
 
     DrawText("SCORE",
-        SCREEN_WIDTH / 2 - (textFontSize * strlen("SCORE") / 2),
+        (SCREEN_WIDTH - MeasureText("SCORE", textFontSize)) / 2,
         textFontSize,
         textFontSize,
         WHITE
@@ -150,7 +192,7 @@ void drawHeader(int playerScore, int botScore) {
     sprintf_s(score, 6, "%1d : %1d", playerScore, botScore);
 
     DrawText(score,
-        SCREEN_WIDTH / 2 - (textFontSize * strlen("SCORE") / 2) + 15,
+        (SCREEN_WIDTH - MeasureText(score, scoreFontSize)) / 2,
         textFontSize + scoreFontSize,
         scoreFontSize,
         RED
@@ -168,7 +210,7 @@ Ball_t initBall() {
 
     int xVelocityDir = rand() % 2 == 1 ? 1 : -1;
     int yVelocityDir = rand() % 2 == 1 ? 1 : -1;
-    int yVelocity = 0;
+    int yVelocity = rand() % BaseVelocity;
 
     ball.velocity = (Vector2){ xVelocityDir * BaseVelocity, yVelocityDir * yVelocity };
 
@@ -218,8 +260,9 @@ int getCollisions() {
 
     Vector2 nextFrameBallCenter = { Ball.center.x + Ball.velocity.x / TARGET_FPS, Ball.center.y + Ball.velocity.y / TARGET_FPS };
 
-    if (Ball.velocity.x < 0 && CheckCollisionRayLeftRacket(Ball.center, nextFrameBallCenter, LeftRacket))
+    if (Ball.velocity.x < 0 && CheckCollisionRayLeftRacket(Ball.center, nextFrameBallCenter, LeftRacket)) {
         collisions |= LEFT_RACKET;
+    }
     else if (Ball.velocity.x > 0 && CheckCollisionRayRightRacket(Ball.center, nextFrameBallCenter, RightRacket))
         collisions |= RIGHT_RACKET;
 
@@ -239,9 +282,9 @@ Racket_t initRacket(int x) {
     };
 
     racket.hitBox = (Rectangle){
-        x,
-        Field.y + (FIELD_HEIGHT - baseRacketHeight) / 2 + Ball.radius,
-        RACKET_WIDTH + Ball.radius,
+        x - Ball.radius,
+        Field.y + (FIELD_HEIGHT - baseRacketHeight) / 2 - Ball.radius,
+        RACKET_WIDTH + 2 * Ball.radius,
         baseRacketHeight + 2 * Ball.radius
     };
 
@@ -281,8 +324,10 @@ void updatePlayerRacket() {
 
     int step = LeftRacket.velocity.y / TARGET_FPS;
 
-    if (canMoveRacket(LeftRacket))
+    if (canMoveRacket(LeftRacket)) {
         LeftRacket.drawingBox.y += step;
+        LeftRacket.hitBox.y += step;
+    }
 }
 
 void updateBotRacket(int level) {
@@ -290,13 +335,15 @@ void updateBotRacket(int level) {
 
     float YCenterRacket = RightRacket.drawingBox.y + RightRacket.drawingBox.height / 2;
 
-    if (YCenterRacket < Ball.center.y + Ball.radius)
+    if (YCenterRacket < Ball.center.y)
         RightRacket.velocity.y = RACKET_VELOCITY / velocityFactor;
-    else if (YCenterRacket > Ball.center.y + Ball.radius)
+    else if (YCenterRacket > Ball.center.y)
         RightRacket.velocity.y = -RACKET_VELOCITY / velocityFactor;
 
-    if (canMoveRacket(RightRacket))
+    if (canMoveRacket(RightRacket)) {
         RightRacket.drawingBox.y += RightRacket.velocity.y / TARGET_FPS;
+        RightRacket.hitBox.y += RightRacket.velocity.y / TARGET_FPS;
+    }
 }
 
 bool canMoveRacket(Racket_t racket) {
@@ -314,12 +361,11 @@ bool canMoveRacket(Racket_t racket) {
 // Racket that ball collide with
 void updateBallYVelocity(Racket_t racket) {
     const float maxChangeInVelocity = 200;
-    const float maxDiff = racket.drawingBox.height / 2 + Ball.radius;
+    const float maxDiff = racket.hitBox.height / 2;
 
-    float RacketCenterY = racket.drawingBox.y + racket.drawingBox.height / 2;
-    float BallCenterY = Ball.center.y + Ball.radius;
+    float RacketCenterY = racket.hitBox.y + racket.hitBox.height / 2;
 
-    float diff = RacketCenterY - BallCenterY;
+    float diff = RacketCenterY - Ball.center.y;
 
     Ball.velocity.y -= (maxChangeInVelocity / maxDiff) * diff + racket.velocity.y / 10;
 }
@@ -327,30 +373,198 @@ void updateBallYVelocity(Racket_t racket) {
 bool CheckCollisionRayLeftRacket(Vector2 from, Vector2 to, Racket_t racket) {
     float x = racket.hitBox.x + racket.hitBox.width;
 
-    if (from.x > x && to.x > x || from.x < x && to.x < x) return false;
+    Vector2 pos;
 
-    float K = (x - from.x) / (to.x - from.x);
-
-    float y = K * (to.y - from.y) + from.y;
-
-    if (y >= racket.hitBox.y && y <= racket.hitBox.y + racket.hitBox.height) {
-        return true;
-    }
-
-    return false;
+    return CheckCollisionLines(
+        (Vector2) {
+        x, racket.hitBox.y
+    },
+        (Vector2) {
+        x, racket.hitBox.y + racket.hitBox.height
+    },
+        (Vector2) {
+        from.x, from.y
+    },
+        (Vector2) {
+        to.x, to.y
+    },
+        & pos
+    );
 }
 
 bool CheckCollisionRayRightRacket(Vector2 from, Vector2 to, Racket_t racket) {
     float x = racket.hitBox.x;
 
-    if (from.x < x && to.x < x || from.x > x && to.x > x) return false;
+    Vector2 pos;
 
-    float K = (x - from.x) / (to.x - from.x);
+    return CheckCollisionLines(
+        (Vector2) {
+        x, racket.hitBox.y
+    },
+        (Vector2) {
+        x, racket.hitBox.y + racket.hitBox.height
+    },
+        (Vector2) {
+        from.x, from.y
+    },
+        (Vector2) {
+        to.x, to.y
+    },
+        &pos
+    );
+}
 
-    float y = K * (to.y - from.y) + from.y;
+int drawEndScreen(int playerScore, int botScore) {
+    int exitCode = NOACT;
 
-    if (y >= racket.hitBox.y && y <= racket.hitBox.y + racket.hitBox.height)
+    const int fontSize = 60;
+
+    char message[32];
+    char score[32];
+    Color scoreColor;
+
+    if (playerScore > botScore) {
+        sprintf_s(message, 32, "You WON!");
+        scoreColor = DARKGREEN;
+    }
+    else {
+        sprintf_s(message, 32, "You Lost!");
+        scoreColor = RED;
+    }
+    sprintf_s(score, 32, "%d : %d", playerScore, botScore);
+
+    Rectangle buttonForAgain = { 100, 500, 150, 50 };
+    Rectangle buttonForExit = { SCREEN_WIDTH - 100 - 150, 500, 150, 50 };
+
+    while (!WindowShouldClose()) {
+        BeginDrawing();
+        ClearBackground(SKYBLUE);
+
+        DrawText(message, (FIELD_WIDTH - MeasureText(message, fontSize)) / 2, 100, fontSize, YELLOW);
+        DrawText(score, (FIELD_WIDTH - MeasureText(score, fontSize)) / 2, 200, fontSize, scoreColor);
+
+        showButton(buttonForAgain, "Again", WHITE, LIGHTGRAY, BLACK);
+        showButton(buttonForExit, "Exit", WHITE, LIGHTGRAY, BLACK);
+
+        if (isButtonPresed(buttonForAgain)) {
+            exitCode = NEW_GAME;
+            EndDrawing();
+            break;
+        }
+        if (isButtonPresed(buttonForExit)) {
+            exitCode = CLOSE_WINDOW;
+            EndDrawing();
+            break;
+        }
+
+        EndDrawing();
+    }
+
+    return exitCode;
+}
+
+bool isCursorOnButton(Rectangle button) {
+    Vector2 mouse = GetMousePosition();
+
+    if (mouse.x >= button.x && mouse.x <= button.x + button.width &&
+        mouse.y >= button.y && mouse.y <= button.y + button.height)
         return true;
 
     return false;
+}
+
+bool isButtonPresed(Rectangle button) {
+    Vector2 mouse = GetMousePosition();
+
+    if (isCursorOnButton(button) &&
+        IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        return true;
+
+    return false;
+}
+
+void showButton(Rectangle button, char* text, Color color, Color colorForCursorOnButton, Color TextColor) {
+    const int textFontSize = 40;
+
+    Vector2 textSize = MeasureTextEx(GetFontDefault(), text, textFontSize, 1);
+    Vector2 textPos = { button.x + (button.width - textSize.x) / 2,
+                       button.y + (button.height - textSize.y) / 2 };
+
+    if (isCursorOnButton(button))
+        color = colorForCursorOnButton;
+
+    DrawRectangle(button.x, button.y, button.width, button.height, color);
+    DrawTextEx(GetFontDefault(), text, textPos, textFontSize, 1, TextColor);
+}
+
+int drawStartScreen(int* difficulty) {
+    int exitCode = CLOSE_WINDOW;
+
+    const int fontSize = 80;
+
+    char* gameName = "The Pong";
+
+    const int diffFontSize = 50;
+
+    char difficulties[5][32] = {
+        "Easy", "Normal", "Hard", "Extreme", "Imposible"
+    };
+
+
+    while (!WindowShouldClose()) {
+        BeginDrawing();
+        ClearBackground(SKYBLUE);
+
+        DrawText(gameName, (FIELD_WIDTH - MeasureText(gameName, fontSize)) / 2, 50, fontSize, WHITE);
+
+        int buttonStartPosY = 150;
+
+        for (int i = 0; i < 5; i++) {
+            Vector2 buttonSize = MeasureTextEx(GetFontDefault(), difficulties[i], diffFontSize, 1);
+            int buttonStartPosX = (FIELD_WIDTH - buttonSize.x) / 2;
+
+            Rectangle buttonsForDiff = (Rectangle){buttonStartPosX, buttonStartPosY, buttonSize.x, buttonSize.y};
+
+            if (isButtonPresed(buttonsForDiff)) {
+                *difficulty = i;
+                exitCode = NEW_GAME;
+                EndDrawing();
+                return exitCode;
+            }
+            else if (isCursorOnButton(buttonsForDiff))
+                showButton(
+                    buttonsForDiff,
+                    difficulties[i], SKYBLUE, SKYBLUE, GRAY
+                );
+            else
+                showButton(
+                    buttonsForDiff,
+                    difficulties[i], SKYBLUE, SKYBLUE, WHITE
+                );
+
+            buttonStartPosY += buttonSize.y + 40;
+        }
+        // Exit Button
+        Vector2 exitButtonSize = MeasureTextEx(GetFontDefault(), "Exit", diffFontSize, 1);
+        Rectangle exitButton = {
+                (FIELD_WIDTH - exitButtonSize.x) / 2,
+                buttonStartPosY + 20,
+                exitButtonSize.x,
+                exitButtonSize.y
+        };
+
+        showButton(
+            exitButton,
+            "Exit", SKYBLUE, SKYBLUE, RED
+        );
+
+        EndDrawing();
+
+        if (isButtonPresed(exitButton)) {
+            exitCode = CLOSE_WINDOW;
+            break;
+        }
+    }
+
+    return exitCode;
 }
