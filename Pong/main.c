@@ -99,6 +99,7 @@ int main() {
     int botScore = 0;
     int difficulty;
     bool isGameGoing = false;
+    bool shouldWait = false;
 
     while (!WindowShouldClose()) {
         if (!isGameGoing) {
@@ -126,6 +127,8 @@ int main() {
 
         gameOverCode = isGameOver();
         if (gameOverCode) {
+            shouldWait = true;
+
             if (gameOverCode == PLAYER_WON)
                 playerScore++;
             else
@@ -159,6 +162,11 @@ int main() {
         updateBall();
 
         EndDrawing();
+
+        if (shouldWait) {
+            WaitTime(1);
+            shouldWait = false;
+        }
     }
 
     CloseWindow();
